@@ -1,0 +1,13 @@
+## Interface: 30300
+## Title: 好友与屏蔽共享 NB优化版V1.0
+## Notes: 跨角色、跨账号同步好友与屏蔽名单。
+## Author: Vimrasha / NB优化版V1.0
+## OptionalDeps:
+## Dependencies:
+## SavedVariables: FriendShare_GlobalFriends FriendShare_RemovedFriends FriendShare_Alts FriendShare_AutoAlts FriendShare_Peers FriendShare_ConfigVersion IgnoreShare_GlobalIgnores IgnoreShare_RemovedIgnores
+## X-Curse-Packaged-Version: v1.4.2
+## X-Curse-Project-Name: 好友与屏蔽共享 NB优化版V1.0
+## X-Curse-Project-ID: friend-ignore-share
+## X-Curse-Repository-ID: wow/friend-ignore-share/mainline
+FriendShare.xml
+IgnoreShare.xml
