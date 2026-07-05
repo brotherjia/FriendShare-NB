@@ -53,6 +53,7 @@ if ( not FriendShare_ConfigVersion ) then
 	FriendShare_ConfigVersion = 2;
 end
 if ( FriendShare_AutoAlts == nil ) then FriendShare_AutoAlts = false; end
+if ( FriendShare_RemoveAlts == nil ) then FriendShare_RemoveAlts = true; end
 FriendShare_Peers = FriendShare_Peers or {};
 
 
@@ -265,8 +266,10 @@ function FriendShare_Command(command)
 		FriendShare_ChatPrint(string.format(lineFormat, "<help>", "显示帮助信息。"));
 		FriendShare_ChatPrint(string.format(lineFormat, "reset", "用当前角色好友列表重置全局好友列表。"));
 		FriendShare_ChatPrint(string.format(lineFormat, "import", "导入全局好友列表。"));
-		FriendShare_ChatPrint(string.format(lineFormat, "alts", "切换小号好友处理开关。"));
-		FriendShare_ChatPrint(string.format(lineFormat, "alts on|off", "开启或关闭小号好友处理。"));
+		FriendShare_ChatPrint(string.format(lineFormat, "alts", "切换小号列表维护开关。"));
+		FriendShare_ChatPrint(string.format(lineFormat, "alts on|off", "开启或关闭小号列表维护。"));
+		FriendShare_ChatPrint(string.format(lineFormat, "removealts", "切换是否自动删除好友列表里的小号。"));
+		FriendShare_ChatPrint(string.format(lineFormat, "removealts on|off", "开启或关闭自动删除好友列表里的小号。"));
 		FriendShare_ChatPrint(string.format(lineFormat, "peer add <name>", "添加跨账号同步角色。"));
 		FriendShare_ChatPrint(string.format(lineFormat, "peer remove <name>", "移除跨账号同步角色。"));
 		FriendShare_ChatPrint(string.format(lineFormat, "peers", "列出跨账号同步角色。"));
@@ -287,16 +290,16 @@ function FriendShare_Command(command)
 		if ( param == "" ) then
 			FriendShare_AutoAlts = not FriendShare_AutoAlts;
 			if ( FriendShare_AutoAlts ) then
-				FriendShare_ChatPrint( "FriendShare: 小号好友处理已开启。" );
+				FriendShare_ChatPrint( "FriendShare: 小号列表维护已开启。" );
 			else
-				FriendShare_ChatPrint( "FriendShare: 小号好友处理已关闭。" );
+				FriendShare_ChatPrint( "FriendShare: 小号列表维护已关闭。" );
 			end
 		elseif ( param == "on" ) then
 			FriendShare_AutoAlts = true;
-			FriendShare_ChatPrint( "FriendShare: 小号好友处理已开启。" );
+			FriendShare_ChatPrint( "FriendShare: 小号列表维护已开启。" );
 		elseif ( param == "off" ) then
 			FriendShare_AutoAlts = false;
-			FriendShare_ChatPrint( "FriendShare: 小号好友处理已关闭。" );
+			FriendShare_ChatPrint( "FriendShare: 小号列表维护已关闭。" );
 		else
 			FriendShare_ChatPrint( "FriendShare: /friendshare alts 参数未知。" );
 		end
@@ -307,6 +310,29 @@ function FriendShare_Command(command)
 			FriendShare_ProcessAlts( currentFriends );
 		end
 
+	end
+	if (cmd == "removealts" ) then
+		local removeAlts = FriendShare_RemoveAlts;
+		if ( param == "" ) then
+			FriendShare_RemoveAlts = not FriendShare_RemoveAlts;
+		elseif ( param == "on" ) then
+			FriendShare_RemoveAlts = true;
+		elseif ( param == "off" ) then
+			FriendShare_RemoveAlts = false;
+		else
+			FriendShare_ChatPrint( "FriendShare: /friendshare removealts 参数未知。" );
+		end
+
+		if ( FriendShare_RemoveAlts ) then
+			FriendShare_ChatPrint( "FriendShare: 自动删除好友列表里的小号已开启。" );
+		else
+			FriendShare_ChatPrint( "FriendShare: 自动删除好友列表里的小号已关闭。" );
+		end
+
+		if ( removeAlts ~= FriendShare_RemoveAlts and FriendShare_RemoveAlts ) then
+			local currentFriends = FriendShare_CurrentFriends();
+			FriendShare_ProcessAlts( currentFriends );
+		end
 	end
 	if ( cmd == "peer" ) then
 		local k,l, subcmd, peer = string.find(param, "^([^ ]+) (.+)$");
@@ -410,7 +436,7 @@ function FriendShare_ProcessAlts( curFriends )
 	for i, name in pairs( FriendShare_Alts[realmAndFaction] ) do
 		local name = FriendShare_Alts[realmAndFaction][i]
 		-- Alts are excluded from the normal friend list to save friend slots.
-		if ( name ~= player and curFriends[name] ) then
+		if ( FriendShare_RemoveAlts and name ~= player and curFriends[name] ) then
 			FriendShare_ChatPrint( "FriendShare: 正在从本地好友列表移除小号 " .. name .. "。" );
 			suppressFriendMessages = true;
 			RemoveFriend( name );
