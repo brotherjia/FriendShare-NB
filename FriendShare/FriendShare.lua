@@ -39,6 +39,7 @@ local suppressFriendMessages = false;
 local suppressPeerBroadcast = false;
 local receivingFullSync = {};
 local recentSyncMessages = {};
+local recentSyncTargets = {};
 
 -- Store current friends so that they are available when processing
 -- the PLAYER_LEAVING_WORLD event.
@@ -54,6 +55,7 @@ if ( not FriendShare_ConfigVersion ) then
 end
 if ( FriendShare_AutoAlts == nil ) then FriendShare_AutoAlts = false; end
 if ( FriendShare_RemoveAlts == nil ) then FriendShare_RemoveAlts = true; end
+if ( FriendShare_RemoveAltsVersion == nil ) then FriendShare_RemoveAltsVersion = 0; end
 FriendShare_Peers = FriendShare_Peers or {};
 
 
@@ -119,6 +121,11 @@ end
 function FriendShare_SendAddonMessage(target, message)
 	if ( not target or target == "" ) then return; end
 	target = FriendShare_NormalizeName( target );
+	if ( GetTime ) then
+		recentSyncTargets[target] = GetTime();
+	else
+		recentSyncTargets[target] = 0;
+	end
 	if ( SendAddonMessage ) then
 		local ok = pcall( SendAddonMessage, addonPrefix, message, "WHISPER", target );
 		if ( not ok ) then
@@ -145,10 +152,82 @@ function FriendShare_FilterSyncWhisper(self, event, message, author)
 	end
 end
 
+function FriendShare_FilterSyncSystemMessage(self, event, message)
+	if ( not message ) then return false; end
+	local now = 0;
+	if ( GetTime ) then now = GetTime(); end
+	local lowerMessage = string.lower( message );
+	for target, sentAt in pairs( recentSyncTargets ) do
+		if ( now - sentAt > 8 ) then
+			recentSyncTargets[target] = nil;
+		elseif ( string.find( lowerMessage, string.lower( target ), 1, true ) and
+			( string.find( message, "未找到", 1, true ) or
+			string.find( message, "在线玩家", 1, true ) or
+			string.find( lowerMessage, "no player named", 1, true ) or
+			string.find( lowerMessage, "not found", 1, true ) or
+			string.find( lowerMessage, "not currently playing", 1, true ) ) )
+		then
+			return true;
+		end
+	end
+	return false;
+end
+
 function FriendShare_BroadcastToPeers(message)
 	if ( suppressPeerBroadcast ) then return; end
 	for peer, name in pairs( FriendShare_Peers ) do
 		FriendShare_SendAddonMessage( name, message );
+	end
+end
+
+function FriendShare_BroadcastRemoveAltsSetting(skipPeer)
+	if ( suppressPeerBroadcast ) then return; end
+	local setting = "OFF";
+	if ( FriendShare_RemoveAlts ) then setting = "ON"; end
+	for peer, name in pairs( FriendShare_Peers ) do
+		if ( name ~= skipPeer ) then
+			FriendShare_SendAddonMessage( name, "SET_REMOVEALTS|" .. realmAndFaction .. "|" .. setting .. "," .. FriendShare_RemoveAltsVersion );
+		end
+	end
+end
+
+function FriendShare_NextRemoveAltsVersion()
+	local now = 0;
+	if ( time ) then
+		now = time();
+	elseif ( GetTime ) then
+		now = GetTime();
+	end
+	if ( now <= FriendShare_RemoveAltsVersion ) then
+		now = FriendShare_RemoveAltsVersion + 1;
+	end
+	FriendShare_RemoveAltsVersion = now;
+	return now;
+end
+
+function FriendShare_SetRemoveAlts(enabled, broadcast, silent, skipPeer, version)
+	if ( version and version <= FriendShare_RemoveAltsVersion ) then
+		return;
+	end
+	if ( version ) then
+		FriendShare_RemoveAltsVersion = version;
+	else
+		FriendShare_NextRemoveAltsVersion();
+	end
+	FriendShare_RemoveAlts = enabled;
+	if ( FriendShare_RemoveAlts ) then
+		if ( not silent ) then
+			FriendShare_ChatPrint( "FriendShare: 自动删除好友列表里的小号已开启。" );
+		end
+		FriendShare_ProcessAlts( FriendShare_CurrentFriends() );
+	else
+		if ( not silent ) then
+			FriendShare_ChatPrint( "FriendShare: 自动删除好友列表里的小号已关闭。" );
+		end
+	end
+
+	if ( broadcast ) then
+		FriendShare_BroadcastRemoveAltsSetting( skipPeer );
 	end
 end
 
@@ -192,6 +271,11 @@ function FriendShare_SendFullSync(peer)
 	local player = UnitName( "player" );
 
 	FriendShare_SendAddonMessage( peer, "BEGIN|" .. realmAndFaction );
+	if ( FriendShare_RemoveAlts ) then
+		FriendShare_SendAddonMessage( peer, "SET_REMOVEALTS|" .. realmAndFaction .. "|ON," .. FriendShare_RemoveAltsVersion );
+	else
+		FriendShare_SendAddonMessage( peer, "SET_REMOVEALTS|" .. realmAndFaction .. "|OFF," .. FriendShare_RemoveAltsVersion );
+	end
 	FriendShare_SendAddonMessage( peer, "ALT|" .. realmAndFaction .. "|" .. player );
 	FriendShare_SendNameChunks( peer, "ALTS", alts );
 	FriendShare_SendNameChunks( peer, "FRIENDS", globalFriends );
@@ -218,6 +302,7 @@ function FriendShare_OnLoad()
 	if ( ChatFrame_AddMessageEventFilter ) then
 		ChatFrame_AddMessageEventFilter( "CHAT_MSG_WHISPER", FriendShare_FilterSyncWhisper );
 		ChatFrame_AddMessageEventFilter( "CHAT_MSG_WHISPER_INFORM", FriendShare_FilterSyncWhisper );
+		ChatFrame_AddMessageEventFilter( "CHAT_MSG_SYSTEM", FriendShare_FilterSyncSystemMessage );
 	end
 
 	SLASH_FRIENDSHARE1 = "/friendshare";
@@ -312,26 +397,14 @@ function FriendShare_Command(command)
 
 	end
 	if (cmd == "removealts" ) then
-		local removeAlts = FriendShare_RemoveAlts;
 		if ( param == "" ) then
-			FriendShare_RemoveAlts = not FriendShare_RemoveAlts;
+			FriendShare_SetRemoveAlts( not FriendShare_RemoveAlts, true, false );
 		elseif ( param == "on" ) then
-			FriendShare_RemoveAlts = true;
+			FriendShare_SetRemoveAlts( true, true, false );
 		elseif ( param == "off" ) then
-			FriendShare_RemoveAlts = false;
+			FriendShare_SetRemoveAlts( false, true, false );
 		else
 			FriendShare_ChatPrint( "FriendShare: /friendshare removealts 参数未知。" );
-		end
-
-		if ( FriendShare_RemoveAlts ) then
-			FriendShare_ChatPrint( "FriendShare: 自动删除好友列表里的小号已开启。" );
-		else
-			FriendShare_ChatPrint( "FriendShare: 自动删除好友列表里的小号已关闭。" );
-		end
-
-		if ( removeAlts ~= FriendShare_RemoveAlts and FriendShare_RemoveAlts ) then
-			local currentFriends = FriendShare_CurrentFriends();
-			FriendShare_ProcessAlts( currentFriends );
 		end
 	end
 	if ( cmd == "peer" ) then
@@ -340,6 +413,12 @@ function FriendShare_Command(command)
 		if ( peer ) then peer = FriendShare_NormalizeName(peer); end
 		if ( subcmd == "add" and peer ) then
 			FriendShare_Peers[peer] = peer;
+			FriendShare_CurrentAltTable()[peer] = peer;
+			FriendShare_CurrentGlobalTable()[peer] = nil;
+			FriendShare_CurrentRemovedTable()[peer] = nil;
+			if ( FriendShare_RemoveAlts ) then
+				FriendShare_ProcessAlts( FriendShare_CurrentFriends() );
+			end
 			FriendShare_ChatPrint( "FriendShare: 已添加同步角色 " .. peer .. "。" );
 		elseif ( ( subcmd == "remove" or subcmd == "del" ) and peer ) then
 			FriendShare_Peers[peer] = nil;
@@ -379,6 +458,9 @@ function FriendShare_Import()
 	-- Clear the list of importedGlobalFriends before trying to import again.
 	importedGlobalFriends = {};
 
+	-- Process alts before importing globals so alts are never imported as friends.
+	FriendShare_ProcessAlts( curFriends );
+
 	-- Remove local friends that have been removed globaly
 	local globalRemoves = FriendShare_RemovedFriends[realmAndFaction];
 	for i, name in pairs( globalRemoves ) do
@@ -415,11 +497,19 @@ function FriendShare_Import()
 			suppressFriendMessages = true;
 			AddFriend( name );
 			suppressFriendMessages = false;
+			curFriends[name] = name;
 			addedFriends[name] = name;
 		end
 	end
 
+	-- Catch any alt that slipped in through old saved data or a delayed sync update.
 	FriendShare_ProcessAlts( curFriends );
+	for i, altName in pairs( FriendShare_Alts[realmAndFaction] ) do
+		if ( addedFriends[altName] and not curFriends[altName] ) then
+			addedFriends[altName] = nil;
+			removedFriends[altName] = altName;
+		end
+	end
 	FriendShare_UpdateGlobalFriends( curFriends );
 
 	if ( numFriends > 50 ) then
@@ -441,6 +531,7 @@ function FriendShare_ProcessAlts( curFriends )
 			suppressFriendMessages = true;
 			RemoveFriend( name );
 			suppressFriendMessages = false;
+			curFriends[name] = nil;
 		end
 		-- Alts are not to be stored in the normal lists
 		FriendShare_GlobalFriends[realmAndFaction][name] = nil;
@@ -521,6 +612,7 @@ function FriendShare_OnEvent(event)
 			IgnoreShare_Import();
 		else	
 			savedCurrentFriends = FriendShare_CurrentFriends();
+			FriendShare_ProcessAlts( savedCurrentFriends );
 			FriendShare_UpdateGlobalFriends( savedCurrentFriends );
 		end
 	end
@@ -570,7 +662,9 @@ function FriendShare_OnSyncMessage(message, sender)
 	end
 	if ( not command or key ~= realmAndFaction ) then return; end
 	local names = name;
-	if ( command ~= "ALTS" and command ~= "FRIENDS" and command ~= "REMOVES" ) then
+	if ( command ~= "ALTS" and command ~= "FRIENDS" and command ~= "REMOVES" and
+		command ~= "SET_REMOVEALTS" )
+	then
 		name = FriendShare_NormalizeName( name );
 	end
 
@@ -596,12 +690,30 @@ function FriendShare_OnSyncMessage(message, sender)
 		FriendShare_SendFullSync( sender );
 		return;
 	end
+	if ( command == "SET_REMOVEALTS" ) then
+		local setting = name;
+		local version = nil;
+		local k,l, parsedSetting, parsedVersion = string.find( name, "^([^,]+),(.+)$" );
+		if ( parsedSetting ) then
+			setting = parsedSetting;
+			version = tonumber( parsedVersion );
+		end
+		if ( setting == "ON" ) then
+			FriendShare_SetRemoveAlts( true, true, false, sender, version );
+		elseif ( setting == "OFF" ) then
+			FriendShare_SetRemoveAlts( false, true, false, sender, version );
+		end
+		return;
+	end
 	if ( not name or name == "" or name == UNKNOWN ) then return; end
 
 	if ( command == "ALT" ) then
 		alts[name] = name;
 		globalFriends[name] = nil;
 		removedFriends[name] = nil;
+		if ( FriendShare_RemoveAlts ) then
+			FriendShare_ProcessAlts( FriendShare_CurrentFriends() );
+		end
 		return;
 	end
 	if ( command == "ALTS" ) then
@@ -611,6 +723,9 @@ function FriendShare_OnSyncMessage(message, sender)
 			alts[altName] = altName;
 			globalFriends[altName] = nil;
 			removedFriends[altName] = nil;
+		end
+		if ( FriendShare_RemoveAlts ) then
+			FriendShare_ProcessAlts( FriendShare_CurrentFriends() );
 		end
 		return;
 	end
@@ -698,6 +813,13 @@ function FriendShare_AddFriend(name)
 	Saved_AddFriend(name);
 	-- Friend will be added to the global list on next FRIENDLIST_UPDATE event if needed
 	FriendShare_RemovedFriends[realmAndFaction][name] = nil;
+	if ( FriendShare_RemoveAlts and FriendShare_Alts[realmAndFaction][name] ) then
+		suppressFriendMessages = true;
+		RemoveFriend( name );
+		suppressFriendMessages = false;
+		FriendShare_ChatPrint( "FriendShare: " .. name .. " 是已记录的小号，已从好友列表移除。" );
+		return;
+	end
 	if ( not FriendShare_Alts[realmAndFaction][name] ) then
 		FriendShare_BroadcastToPeers( "ADD|" .. realmAndFaction .. "|" .. name );
 	end
